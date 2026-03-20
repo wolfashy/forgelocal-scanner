@@ -36,16 +36,14 @@ def get_domain(url):
     except Exception:
         return url
 
-def safe_request(url):
+def fetch_once(url):
     start = time.time()
-
     response = requests.get(
         url,
         headers=HEADERS,
         timeout=12,
         allow_redirects=True
     )
-
     elapsed = time.time() - start
 
     content_type = response.headers.get("Content-Type", "").lower()
@@ -54,6 +52,23 @@ def safe_request(url):
 
     response.raise_for_status()
     return response, elapsed
+
+def safe_request(url):
+    errors = []
+
+    try:
+        return fetch_once(url)
+    except Exception as e:
+        errors.append(f"{url} -> {type(e).__name__}: {e}")
+
+    if url.startswith("https://"):
+        fallback_url = "http://" + url[len("https://"):]
+        try:
+            return fetch_once(fallback_url)
+        except Exception as e:
+            errors.append(f"{fallback_url} -> {type(e).__name__}: {e}")
+
+    raise RuntimeError(" | ".join(errors))
 
 def extract_page_data(html):
     soup = BeautifulSoup(html, "html.parser")
@@ -244,16 +259,16 @@ def scan():
             "result": result
         })
 
-    except requests.exceptions.Timeout:
+    except requests.exceptions.Timeout as e:
         return jsonify({
             "success": False,
-            "error": "The website took too long to respond"
+            "error": f"Timeout: {str(e)}"
         }), 504
 
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.ConnectionError as e:
         return jsonify({
             "success": False,
-            "error": "Could not connect to that website"
+            "error": f"Connection error: {str(e)}"
         }), 502
 
     except requests.exceptions.HTTPError as e:
@@ -277,6 +292,13 @@ def scan():
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify({"ok": True})
+
+@app.route("/", methods=["GET"])
+def home():
+    return jsonify({
+        "ok": True,
+        "message": "ForgeLocal scanner is running"
+    })
 
 if __name__ == "__main__":
     app.run(host="127.0.0.1", port=5050, debug=True)
